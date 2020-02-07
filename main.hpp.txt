@@ -1,0 +1,237 @@
+#pragma once
+#include"Armor.h"
+#include "ArrorAttitudeAlgorithm.h"
+#include "KSJCamera.h"					
+#include "serialport.h"		
+#include <pthread.h>			
+#include <X11/Xlib.h>
+
+void SendData(double yaw, double pitch, double distance, int number);
+void* disposeImg0(void* arg);
+float dis_compensation0(float data);
+float dis_compensation1(float dis);
+pthread_mutex_t SrcMutex;
+int ExposureValue = 1;
+int grayThre=200;
+int colorThre=200;
+KSJCamera cap(728, 544, ExposureValue); 
+double distBuChang = 0.1;
+vector<float>savedis;
+vector<float>savedisH;
+Armor armor;
+
+/*void* receiveReceive(void* arg)
+{
+	while (1)
+	{
+		pthread_mutex_lock(&ReceiveMutex);
+		SerialPort_Recv(ReceiveBuffer, 1);
+		pthread_mutex_unlock(&ReceiveMutex);
+	}
+}*/
+
+void* disposeImg0(void* arg)
+{
+        int finalNum=0;
+	double yaw = 0;
+	double pitch = 0;
+	double dist = 0;
+        ArrorAttitudeAlgorithm targetArmor;
+	//Armor armor;
+	vector<RotatedRect> finalArmor;
+	Mat mainSrc;
+	Mat srcMask;
+	Mat grayBinary;
+	vector<RotatedRect> armorRect;
+namedWindow("Thre");
+	/*感兴趣搜索*/
+	pthread_mutex_lock(&SrcMutex);
+	cap.getSrc(mainSrc);
+	Point2f roiPoint[4];
+	pthread_mutex_unlock(&SrcMutex);
+	uint roiWidth = mainSrc.cols;
+	uint roiHeight = mainSrc.rows;
+	roiPoint[1].x = 0;
+	roiPoint[1].y = 0;
+	Rect srcRoi = Rect(roiPoint[1].x, roiPoint[1].y, roiWidth, roiHeight);
+	while (1)
+	{
+		cout << "自瞄" << "\n";
+		finalArmor.clear();
+		while (1)
+		{
+			//pthread_mutex_lock(&SrcMutex);
+			cap.getSrc(mainSrc);
+			//pthread_mutex_unlock(&SrcMutex);
+			if (mainSrc.empty())
+				continue;
+createTrackbar("grayThre","Thre",&grayThre,255,0);
+createTrackbar("colorThre","Thre",&colorThre,255,0);
+			//准备ROI和（跟踪颜色空间，灰度）二值图
+						/*颜色空间*/
+			srcMask = mainSrc(srcRoi).clone();
+			Mat colorBinary(srcMask.size(), CV_8UC1, Scalar(0));
+			Mat	mainGray;
+			cvtColor(srcMask, mainGray, COLOR_BGR2GRAY);
+			threshold(mainGray, grayBinary, grayThre, 255, THRESH_BINARY);
+			dilate(grayBinary, grayBinary, Mat(), Point(-1, -1), 2);
+
+			armor.getColorBinary(srcMask, colorBinary, armor.Color,colorThre);
+			Mat mergeBinary(srcMask.size(), CV_8UC1, Scalar(0));
+			armor.mergeGrayColor(colorBinary, grayBinary, mergeBinary);
+			imshow("colorBinary", colorBinary); 
+			imshow("grayBinary", grayBinary);
+			imshow("mergeBinary", mergeBinary);
+
+			armor.detectContour(mergeBinary, armorRect,srcRoi);
+
+			armor.nonML(mainSrc, armorRect, finalArmor);
+			imshow("mainSrc", mainSrc);
+			waitKey(1);
+			if (!finalArmor.empty())
+			{
+				/*感兴趣追踪*/
+				/*finalArmor[0].points(roiPoint);
+				roiPoint[1].x -= finalArmor[0].size.width*0.5;
+				roiPoint[1].y -= finalArmor[0].size.height*0.5;
+				roiWidth = finalArmor[0].size.width * 2;
+				roiHeight = finalArmor[0].size.height * 2;
+
+
+				if (roiPoint[1].x <= 0 || roiPoint[1].x >= mainSrc.cols || roiPoint[1].y <= 0 || roiPoint[1].y >= mainSrc.rows
+					|| roiPoint[1].x + roiWidth >= mainSrc.cols || roiPoint[1].y + roiHeight >= mainSrc.rows)
+				{
+				
+					roiPoint[1].x = 0;
+					roiPoint[1].y = 0;
+					roiWidth = mainSrc.cols;
+					roiHeight = mainSrc.rows;
+				}*/
+				//srcRoi = Rect(roiPoint[1].x, roiPoint[1].y, roiWidth, roiHeight);
+                                srcRoi = Rect(0, 0, mainSrc.cols, mainSrc.rows);
+                               // finalArmor[0].size.height = dis_compensation0(finalArmor[0].size.height);
+                                dist=targetArmor.angleSover(mainSrc,finalArmor[0],yaw,pitch);
+                               // dist = dis_compensation1(dist);
+                                printf("\t[Yaw=%f,Pich=%f,dist=%f,arrorNum=%d]\n", yaw, pitch, dist, finalNum);
+                                if(abs(yaw)<17)
+                                {
+                                 SendData(yaw,-1*pitch,dist/100.0,0);
+                                }
+                                 else
+                                 {
+                                  SendData(0,0,0,9);
+                                 }
+			}
+			else
+			{
+				SendData(0,0,0,9);
+				srcRoi = Rect(0, 0, mainSrc.cols, mainSrc.rows);
+			}
+			armorRect.clear();
+			finalArmor.clear();
+		}
+	}
+}
+float dis_compensation0(float data)
+{
+	if (savedisH.size() != 20)
+	{
+		savedisH.push_back(data);
+		return data;
+	}
+	else
+	{
+		savedisH.erase(savedisH.begin());
+		savedisH.push_back(data);
+		float add = 0;
+		for (unsigned int i = 1; i < 8; i++)
+		{
+			add = add + savedisH[i];
+		}
+		float aveadd = add / 7.0;
+		return (aveadd * 0.7 + savedisH[8] * 0.3);
+	}
+}
+
+float dis_compensation1(float dis)
+{
+	double answer = (250 - dis) / 250.0;
+	printf("补偿=%f\n", answer);
+	if (dis < 500)
+		dis = dis + (abs(int(dis) - 500) * distBuChang);
+
+	if (savedis.size() != 20)
+	{
+		savedis.push_back(dis);
+		return dis;
+	}
+	else
+	{
+		savedis.erase(savedis.begin());
+		savedis.push_back(dis);
+		float add = 0;
+		for (unsigned int i = 1; i < 8; i++)
+		{
+			add = add + savedis[i];
+		}
+		float aveadd = add / 7.0;
+		return (aveadd * 0.7 + savedis[8] * 0.3);
+	}
+}
+void DecodeSend(int date1, int date2, int date3, int date4, int date5, int date6, int date7,  char  flag1, char  flag2)
+{
+	uchar data1[18] = { '0' };
+
+	data1[0] = '$';
+
+	data1[1] = (uchar)(date1 >> 8);
+	data1[2] = (uchar)(date1);
+	data1[3] = (uchar)(date2 >> 8);
+	data1[4] = (uchar)(date2);
+
+
+	data1[5] = (uchar)(date3 >> 8);
+	data1[6] = (uchar)(date3);
+	data1[7] = (uchar)(date4 >> 8);
+	data1[8] = (uchar)(date4);
+
+	data1[9] = (uchar)(date5 >> 8);
+	data1[10] = (uchar)(date5);
+	data1[11] = (uchar)(date6 >> 8);
+	data1[12] = (uchar)(date6);
+
+	data1[13] = (uchar)(date7 >> 8);
+	data1[14] = (uchar)(date7);
+
+	data1[15] = flag1;
+	data1[16] = flag2;
+	data1[17] = '#';
+	SerialPort_Send(data1, 18);
+}
+void SendData(double yaw, double pitch, double distance, int number)
+{
+	//printf("\t[Yaw=%f\tPich=%f\tdist=%f\tarrorNum=%d]\n", yaw, pitch, distance, number);
+	char flag1, flag2;
+	int yaw_integer;  
+	int yaw_decimals; 
+	int pitch_integer;
+	int pitch_decimals;
+	int distance_integer;
+	int distance_decimals;
+
+	if (yaw >= 0) flag1 = 1;  
+	else flag1 = 0;
+	if (pitch >= 0) flag2 = 1;
+	else flag2 = 0;
+	
+
+	yaw_decimals = int(abs(yaw * 100) - int(abs(yaw)) * 100); 
+	yaw_integer = int(abs(yaw));
+	pitch_decimals = int(abs(pitch * 100) - int(abs(pitch)) * 100);
+	pitch_integer = int(abs(pitch));
+	distance_decimals = int(distance * 100 - int(distance) * 100);
+	distance_integer = int(distance);
+	//printf("yaw=%d--%d.%d,pitch=%d--%d.%d,%d--%d.%d,number=%d\n", flag1, yaw_integer, yaw_decimals, flag2, pitch_integer, pitch_decimals, flag3, distance_integer, distance_decimals, number);
+
+	DecodeSend(yaw_integer, yaw_decimals, pitch_integer, pitch_decimals, distance_integer, distance_decimals, number, flag1, flag2);
+}

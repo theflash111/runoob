@@ -1,0 +1,24 @@
+#include "main.h"
+int main()
+{
+	char com[20] = "/dev/ttyusb";
+	SerialPort_Setup(com, 115200);
+	//FileStorage fswrite("/home/ubuntu/MrShiSan/xml/test.xml", FileStorage::WRITE);
+//extern int colorThre = 120;
+//extern int grayThre = 100;
+//fswrite<<"colorThre" << colorThre;
+//fswrite<<"grayThre" << grayThre;
+	//fswrite.release();
+       FileStorage fsRead("/home/ubuntu/MrShiSan/xml/test.xml", FileStorage::READ);
+        fsRead["colorThre"] >> colorThre;
+        fsRead["grayThre"] >> grayThre;
+        KSJ_ExposureTimeSet(0, ExposureValue);
+	pthread_t tId0;
+pthread_create(&tId0,NULL,disposeImg0,NULL);
+pthread_join(tId0,NULL);
+	/*int r0 = pthread_create(&tId0, NULL, disposeImg0, NULL);
+	if (!r0)
+		printf("bbbbbbbbb");*/
+	waitKey(100);
+	return 0;
+}

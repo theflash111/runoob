@@ -1,0 +1,188 @@
+#include"Armor.h"
+Armor::Armor()
+{
+}
+Armor::~Armor()
+{
+}
+void Armor::getColorBinary(Mat src, Mat& dst, uchar colorFlag, uchar colorThre)
+{
+	if (colorFlag == 'b')
+	{
+		for (int nI = 0; nI < src.rows; nI++)
+		{
+			uchar* bgr = src.ptr<uchar>(nI);
+			uchar* pix = dst.ptr<uchar>(nI);
+			for (int nJ = 0, nK = 0; nJ < src.cols * 3; nJ += 3, nK++)//B:bgr[nJ],G:bgr[nJ+1],R:bgr[nJ+2]
+			{
+				if ((bgr[nJ] - bgr[nJ + 2]) >= colorThre)//B-R
+					pix[nK] = 255;
+				else
+					pix[nK] = 0;
+			}
+		}
+	}
+	else
+	{
+		for (int nI = 0; nI < src.rows; nI++)
+		{
+			uchar* bgr = src.ptr<uchar>(nI);
+			uchar* pix = dst.ptr<uchar>(nI);
+			for (int nJ = 0, nK = 0; nJ < src.cols * 3; nJ += 3, nK++)//B:bgr[nJ],G:bgr[nJ+1],R:bgr[nJ+2]
+			{
+				if ((bgr[nJ + 2] - bgr[nJ]) >= colorThre)//R-B
+					pix[nK] = 255;
+				else
+					pix[nK] = 0;
+			}
+		}
+	}
+	dilate(dst, dst, Mat(), Point(-1, -1), 5); //图像膨胀
+}
+void Armor::mergeGrayColor(Mat colorBinary, Mat grayBinary, Mat & mergeBinary)
+{
+	for (int nI = 0; nI < colorBinary.rows; nI++)
+	{
+		uchar* colorPix = colorBinary.ptr<uchar>(nI);
+		uchar* grayPix = grayBinary.ptr<uchar>(nI);
+		uchar* mergePix = mergeBinary.ptr<uchar>(nI);
+		for (int nJ = 0; nJ < colorBinary.cols; nJ++)//B:bgr[nJ],G:bgr[nJ+1],R:bgr[nJ+2]
+		{
+			if (grayPix[nJ] == 255 && colorPix[nJ] == 255)
+				mergePix[nJ] = 255;
+			else
+				mergePix[nJ] = 0;
+		}
+	}
+}
+void Armor::hogDetector(Mat src, Mat & featureMat)
+{
+	Size winSize = Size(svmWidth, svmHeight);
+	Size blockSize = Size(8, 8);
+	Size blockStride = Size(4, 4);
+	Size cellSize = Size(4, 4);
+	int nBins = 9;
+	HOGDescriptor hog(winSize, blockSize, blockStride, cellSize, nBins);
+
+	vector<float> descriptors;
+	hog.compute(src, descriptors);
+	featureMat = Mat::zeros(1, descriptors.size(), CV_32FC1);
+
+	for (int j = 0; j < descriptors.size(); j++)
+	{
+		featureMat.at<float>(0, j) = descriptors[j];
+	}
+}
+int Armor::detectContour(Mat src, vector<RotatedRect>&armorRect ,Rect srcRoi)
+{
+	vector<RotatedRect>vEllipse;
+	vector<vector<Point>> contour;
+	findContours(src, contour, RETR_CCOMP, CHAIN_APPROX_NONE);
+	for (int i = 0; i < contour.size(); i++)
+	{
+		if (contour[i].size() > 6)
+		{
+					RotatedRect s = fitEllipse(contour[i]);
+					if ((s.angle<ledMinAngle || s.angle>ledMaxAngle) && (s.size.area() > ledMinArea&&
+						s.size.area() < ledMaxArea) && (s.size.width / s.size.height) <= ledRatio)
+					{
+						vEllipse.push_back(fitEllipse(contour[i]));
+					}
+		}
+	} 
+	for (unsigned int nI = 0; nI < vEllipse.size() - 1; nI++)
+	{
+		uchar count = 0;
+		RotatedRect armorMin;
+		if (vEllipse.size() < 2)
+			break;
+		for (unsigned int nJ = nI + 1; nJ < vEllipse.size(); nJ++)
+		{
+			double areaProp;
+			if (vEllipse[nI].size.area() < vEllipse[nJ].size.area())
+				areaProp = vEllipse[nI].size.area() / vEllipse[nJ].size.area();
+			else
+				areaProp = vEllipse[nJ].size.area() / vEllipse[nI].size.area();
+			if (areaProp > 0.3)
+			{
+				double dX;
+				double dY;
+				double dAngle;
+				double dWidthJudge;
+				RotatedRect roiArror;
+				dX = abs(vEllipse[nJ].center.x - vEllipse[nI].center.x);//水平方向偏置
+				dY = abs(vEllipse[nJ].center.y - vEllipse[nI].center.y);//垂直方向偏置
+
+				if (vEllipse[nJ].angle > 90)
+					vEllipse[nJ].angle = 180 - vEllipse[nJ].angle;
+				if (vEllipse[nI].angle > 90)
+					vEllipse[nI].angle = 180 - vEllipse[nI].angle;
+				dAngle = abs(vEllipse[nJ].angle - vEllipse[nI].angle);
+
+				if (dX >= armorMinDiffX && dX <= armorMaxDiffX && dY <= armorMaxDiffY && dAngle <= armorMinAngle)
+				{
+					roiArror.center.x = (vEllipse[nJ].center.x + vEllipse[nI].center.x) / 2.0 + srcRoi.x;
+					roiArror.center.y = (vEllipse[nJ].center.y + vEllipse[nI].center.y) / 2.0 + srcRoi.y;
+					if (vEllipse[nJ].size.height > vEllipse[nI].size.height)
+						dWidthJudge = vEllipse[nJ].size.height;
+					else
+						dWidthJudge = vEllipse[nI].size.height;
+					if (dX > dWidthJudge)
+					{
+						roiArror.size.width = dX;
+						roiArror.size.height = dWidthJudge;
+					}
+					else
+					{
+						roiArror.size.width = dWidthJudge;
+						roiArror.size.height = dX;
+					}
+					if ((roiArror.size.height / roiArror.size.width) >= 0.28)
+					{
+						if (count < 1)
+						{
+							armorMin = roiArror;
+							count = 1;
+						}
+						if (armorMin.size.width > roiArror.size.width)
+						{
+							armorMin = roiArror;
+						}
+					}
+				}
+			}
+		}
+		if (!armorMin.size.empty())
+			armorRect.push_back(armorMin);
+	}
+	return 0;
+}
+int Armor::nonML(Mat src, vector<RotatedRect>&armorRect, vector<RotatedRect>&finalArmor)
+{
+	if (armorRect.empty())
+	{
+		return 0;
+	}
+	finalArmor.push_back(armorRect[0]);
+	if (armorRect.size()>1)
+	{
+		for (uint nI = 0; nI < armorRect.size(); nI++)
+		{
+			if (finalArmor[0].size.area() < armorRect[nI].size.area());
+			finalArmor[0] = armorRect[nI];
+		}
+	}
+	drawRect(src, finalArmor[0], Scalar(0, 255, 255),2);
+	imshow("mainSrc", src);
+	waitKey(1);
+	return 0;
+}
+void Armor::drawRect(Mat src, RotatedRect roi, Scalar color, int tickness)
+{
+	Point2f P[4];
+	roi.points(P);
+	for (int j = 0; j <= 3; j++)
+	{
+		line(src, P[j], P[(j + 1) % 4], color, tickness);
+	}
+}

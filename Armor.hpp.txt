@@ -1,0 +1,36 @@
+#pragma once
+#include <opencv2/opencv.hpp>
+#include <opencv2/ml/ml.hpp>  
+#include <iostream>
+#include <fstream>
+
+using namespace cv;
+using namespace ml;
+using namespace std;
+
+class Armor
+{
+public:
+	int svmWidth = 48;
+	int svmHeight = 48;
+	uchar Color = 'b';
+	//int colorThre=100;
+	int ledMinAngle=50;
+	int ledMaxAngle=130;
+	int ledMinArea=80;
+	int ledMaxArea=3000;
+	double ledRatio=5.9/6;
+	int armorMinDiffX = 10;
+	int armorMaxDiffX = 350;
+	int armorMaxDiffY = 25;
+	int armorMinAngle = 80;
+	int armorMaxAngle = 100;
+	Armor();
+	~Armor();
+	void getColorBinary(Mat src, Mat& dst, uchar colorFlag, uchar colorThre);
+	void hogDetector(Mat src, Mat & featureMat);
+	void mergeGrayColor(Mat colorBinary, Mat grayBinary, Mat & mergeBinary);
+	int detectContour(Mat src, vector<RotatedRect>&armorRect,Rect srcRoi);
+	int nonML(Mat src, vector<RotatedRect>&armorRect, vector<RotatedRect>&finalArmor);
+	void drawRect(Mat src, RotatedRect roi, Scalar color, int tickness);
+};
